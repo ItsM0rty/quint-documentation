@@ -16,17 +16,46 @@
   box-shadow: 0 2px 8px rgba(75, 94, 151, 0.3);
 }
 
+.citation-number {
+  background: #4b5e97;
+  color: white;
+  padding: 2px 6px;
+  border-radius: 50%;
+  font-size: 0.7rem;
+  font-weight: 600;
+  margin-left: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  line-height: 1;
+  text-align: center;
+  vertical-align: baseline;
+}
+
+.citation-number:hover {
+  background: #3b4d7a;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(75, 94, 151, 0.3);
+}
+
 /* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
 }
+
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+
 ::-webkit-scrollbar-thumb {
   background: #374151;
   border-radius: 3px;
 }
+
 ::-webkit-scrollbar-thumb:hover {
   background: #4b5563;
 }
