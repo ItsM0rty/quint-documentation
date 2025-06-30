@@ -154,29 +154,14 @@ class RAGEngine:
     
     def generate_answer(self, query: str, context_chunks: List[Dict[str, Any]]) -> str:
         """Generate answer using Deepseek with context and citations"""
-        
         # Prepare context with citations
         context_text = ""
         for i, chunk in enumerate(context_chunks):
-            context_text += f"\n[Source {i+1}: {chunk['filename']}, page {chunk['page']}]\n{chunk['text']}\n"
-        
-        system_prompt = """You are a helpful research assistant. Answer questions based on the provided context documents. 
+            context_text += f"\n[Source {i+1}: {chunk['filename']}|page {chunk['page']}]\n{chunk['text']}\n"
 
-IMPORTANT CITATION RULES:
-1. Always cite your sources using the format [filename, page X]
-2. Be specific about which document and page number you're referencing
-3. If information comes from multiple sources, cite each one
-4. Only use information from the provided context
-5. If you can't find relevant information in the context, say so clearly
+        system_prompt = """You are a helpful research assistant. Answer questions based on the provided context documents. \n\nIMPORTANT CITATION RULES:\n1. Always cite your sources using the format [filename|page X]\n2. Be specific about which document and page number you're referencing\n3. If information comes from multiple sources, cite each one\n4. Only use information from the provided context\n5. If you can't find relevant information in the context, say so clearly\n\nProvide accurate, well-cited responses."""
 
-Provide accurate, well-cited responses."""
-
-        user_prompt = f"""Question: {query}
-
-Context Documents:
-{context_text}
-
-Please provide a comprehensive answer with proper citations."""
+        user_prompt = f"""Question: {query}\n\nContext Documents:\n{context_text}\n\nPlease provide a comprehensive answer with proper citations in the format [filename|page X]."""
 
         try:
             # Check if API key is available
@@ -184,7 +169,6 @@ Please provide a comprehensive answer with proper citations."""
             if not api_key or api_key == "your-api-key-here":
                 # Fallback: create a simple response from context
                 return self._generate_fallback_answer(query, context_chunks)
-            
             response = self.llm_client.chat.completions.create(
                 model="deepseek-chat",
                 messages=[
@@ -194,9 +178,7 @@ Please provide a comprehensive answer with proper citations."""
                 temperature=0.1,
                 max_tokens=1000
             )
-            
             return response.choices[0].message.content
-            
         except Exception as e:
             # Fallback: create a simple response from context
             return self._generate_fallback_answer(query, context_chunks)
@@ -205,31 +187,23 @@ Please provide a comprehensive answer with proper citations."""
         """Generate a fallback answer when API is not available"""
         if not context_chunks:
             return "I couldn't find any relevant information in the indexed documents to answer your question."
-        
-        # Create a simple response based on the most relevant chunks
         answer_parts = []
         answer_parts.append(f"Based on the indexed documents, here's what I found regarding your question: '{query}'\n\n")
-        
-        # Group by filename for better organization
         chunks_by_file = {}
         for chunk in context_chunks:
             filename = chunk['filename']
             if filename not in chunks_by_file:
                 chunks_by_file[filename] = []
             chunks_by_file[filename].append(chunk)
-        
         for filename, chunks in chunks_by_file.items():
             answer_parts.append(f"**From {filename}:**\n")
             for chunk in chunks:
-                # Clean up the text and add page reference
                 text = chunk['text'].strip()
                 if len(text) > 300:
                     text = text[:300] + "..."
-                answer_parts.append(f"[Page {chunk['page']}] {text}\n")
+                answer_parts.append(f"[{filename}|page {chunk['page']}] {text}\n")
             answer_parts.append("\n")
-        
         answer_parts.append("\n*Note: This is a fallback response. For more sophisticated AI-generated answers, please configure a valid API key.*")
-        
         return "".join(answer_parts)
     
     def query(self, question: str, n_results: int = 5) -> Dict[str, Any]:

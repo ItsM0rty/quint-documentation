@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './com
 import { useDropzone } from 'react-dropzone';
 import { queryDocuments, indexFolder, watchFolder, stopWatchingFolder, listWatchedFolders, listDocuments, getStats, checkHealth } from './lib/api';
 import { open } from '@tauri-apps/plugin-dialog';
+import PDFHighlighterViewer from "./components/PDFHighlighterViewer";
 
 const QuintApp = () => {
   // Document management state
@@ -34,10 +35,10 @@ const QuintApp = () => {
     {
       id: 2,
       type: 'assistant',
-      content: 'Steve Jobs was a visionary entrepreneur who revolutionized multiple industries through his innovative approach to technology and design. His leadership at Apple transformed the company from near bankruptcy to becoming the world\'s most valuable corporation, fundamentally changing how we interact with technology in our daily lives.',
+      content: 'Steve Jobs was a visionary entrepreneur who revolutionized multiple industries[1]. His leadership at Apple transformed the company from near bankruptcy to becoming the world\'s most valuable corporation[2].',
       citations: [
-        { id: 1, docId: 'doc1', page: 8, text: 'visionary entrepreneur who revolutionized multiple industries' },
-        { id: 2, docId: 'doc1', page: 15, text: 'transformed the company from near bankruptcy to becoming the world\'s most valuable corporation' }
+        { id: 1, filename: 'SteveJobsBio.pdf', page: 8 },
+        { id: 2, filename: 'AppleHistory.pdf', page: 15 }
       ]
     }
   ]);
@@ -75,7 +76,9 @@ const QuintApp = () => {
 
   // Auto-scroll chat
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (chatEndRef.current) {
+      chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
   }, [messages]);
 
   const checkHealthStatus = async () => {
@@ -350,81 +353,103 @@ const QuintApp = () => {
 
   useEffect(() => adjustTextareaHeight(), [message]);
 
-  const handleCitationClick = (citationNumber, citations) => {
-    const citation = citations[citationNumber - 1];
-    if (citation) {
-      setActiveDoc(citation.docId);
+  const [activeCitationHighlight, setActiveCitationHighlight] = useState(null);
+
+  const getFileUrlForDoc = (docId) => {
+    const doc = documents.find(d => d.id === docId);
+    if (!doc) return "";
+    return `/uploads/${doc.filename}`;
+  };
+
+  const getTextContentForDoc = (docId) => {
+    const doc = documents.find(d => d.id === docId);
+    return doc?.textContent || "";
+  };
+
+  // Map citations to unique numbers in order of first appearance in the answer
+  const getCitationNumberMapFromText = (content) => {
+    const citationRegex = /\[([^\]|]+)\|page (\d+)\]/g;
+    let match;
+    let map = {};
+    let order = 1;
+    while ((match = citationRegex.exec(content)) !== null) {
+      const key = `${match[1]}|${match[2]}`;
+      if (!map[key]) {
+        map[key] = order++;
+      }
+    }
+    return map;
+  };
+
+  const renderMessageWithCitations = (content, citations = []) => {
+    // Build citation number map for this message from the text order
+    const citationNumberMap = getCitationNumberMapFromText(content);
+    let lastIndex = 0;
+    let parts = [];
+    let match;
+    let key = 0;
+    let foundCitation = false;
+    // Regex for [filename|page X]
+    const citationRegex = /\[([^\]|]+)\|page (\d+)\]/g;
+    while ((match = citationRegex.exec(content)) !== null) {
+      foundCitation = true;
+      const filename = match[1];
+      const page = match[2];
+      const start = match.index;
+      if (start > lastIndex) {
+        parts.push(<span key={`text-${key++}`}>{content.slice(lastIndex, start)}</span>);
+      }
+      // Find citation info if available
+      const citationInfo = citations.find(c => c.filename === filename && String(c.page) === page) || { filename, page };
+      const citationKey = `${filename}|${page}`;
+      const citationNumber = citationNumberMap[citationKey] || '?';
+      parts.push(
+        <Tooltip key={`citation-tooltip-${filename}-${page}`} text={`${filename} (page ${page})`}>
+          <sup
+            className="citation-number inline-block align-super ml-1 px-1 rounded transition-colors duration-150 bg-blue-600 text-white hover:bg-blue-700 cursor-pointer font-semibold"
+            onClick={() => handleCitationClick(filename, page, citationInfo)}
+            tabIndex={0}
+            style={{ userSelect: 'none' }}
+          >
+            [{citationNumber}]
+          </sup>
+        </Tooltip>
+      );
+      lastIndex = citationRegex.lastIndex;
+    }
+    if (lastIndex < content.length) {
+      parts.push(<span key={`text-final`}>{content.slice(lastIndex)}</span>);
+    }
+    if (!foundCitation) {
+      return <div>{content}</div>;
+    }
+    return <div>{parts}</div>;
+  };
+
+  // Update handleCitationClick to match filename case-insensitively and trimmed
+  const handleCitationClick = (filename, page, citationInfo) => {
+    const normalized = (s) => s.trim().toLowerCase();
+    const doc = documents.find(d => normalized(d.filename) === normalized(filename));
+    if (doc) {
+      setActiveDoc(doc.id);
+      setActiveCitationHighlight({
+        page: Number(page),
+        text: citationInfo.text || '',
+        position: citationInfo.position || { pageNumber: Number(page) },
+      });
       setShowSidebar(true);
     }
   };
 
-  const renderMessageWithCitations = (content, citations = []) => {
-    if (!citations || citations.length === 0) {
-      return <div>{content}</div>;
-    }
-
-    // Split content into parts and insert citations
-    let parts = [];
-    let remainingContent = content;
-    let currentIndex = 0;
-
-    citations.forEach((citation, index) => {
-      const citationNumber = index + 1;
-      const citationIndex = remainingContent.indexOf(citation.text);
-      
-      if (citationIndex !== -1) {
-        // Add text before citation
-        if (citationIndex > 0) {
-          parts.push(
-            <span key={`text-${currentIndex}`}>
-              {remainingContent.substring(0, citationIndex)}
-            </span>
-          );
-        }
-        
-        // Add citation text with clickable reference
-        parts.push(
-          <span key={`citation-${citationNumber}`}>
-            {citation.text}
-            <sup 
-              className="citation"
-              onClick={() => handleCitationClick(citationNumber, citations)}
-              style={{
-                background: '#4b5e97',
-                color: 'white',
-                padding: '2px 6px',
-                borderRadius: '6px',
-                fontSize: '0.75rem',
-                fontWeight: '500',
-                marginLeft: '4px',
-                cursor: 'pointer',
-                transition: 'all 0.2s ease',
-                boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
-                display: 'inline-block'
-              }}
-            >
-              [{citationNumber}]
-            </sup>
-          </span>
-        );
-        
-        // Update remaining content
-        remainingContent = remainingContent.substring(citationIndex + citation.text.length);
-        currentIndex++;
-      }
-    });
-    
-    // Add any remaining content
-    if (remainingContent) {
-      parts.push(
-        <span key={`text-final`}>
-          {remainingContent}
-        </span>
-      );
-    }
-
-    return <div>{parts}</div>;
-  };
+  // Tooltip component
+  const Tooltip = ({ children, text }) => (
+    <span className="relative group cursor-pointer">
+      {children}
+      <span className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 w-max max-w-xs px-2 py-1 rounded bg-gray-900 text-white text-xs opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50 shadow-lg whitespace-nowrap">
+        {text}
+      </span>
+    </span>
+  );
 
   return (
     <div className="flex h-screen overflow-hidden bg-black">
@@ -504,7 +529,10 @@ const QuintApp = () => {
         {/* Chat and PDF viewer */}
         <div className="flex flex-1 overflow-hidden">
           {/* Chat Area */}
-          <div className={`flex-1 flex flex-col justify-end px-8 py-6 overflow-y-auto transition-all duration-500 ease-in-out ${showSidebar ? 'w-2/3' : 'w-full'}`}>
+          <div
+            className={`flex-1 flex flex-col justify-end px-8 py-4 transition-all duration-500 ease-in-out custom-scrollbar ${showSidebar ? 'w-2/3' : 'w-full'}`}
+            style={{ overflowY: 'auto', maxHeight: 'calc(100vh - 80px)' }}
+          >
             <div className="space-y-6">
               {messages.map((msg) => (
                 <div key={msg.id} className={`flex ${msg.type === 'user' ? 'justify-end' : 'justify-center'}`}>
@@ -540,10 +568,9 @@ const QuintApp = () => {
                                   <Loader2 className="w-4 h-4 animate-spin" />
                                   <span>Thinking...</span>
                                 </div>
-                              ) : msg.citations ? 
-                                renderMessageWithCitations(msg.content, msg.citations) : 
-                                msg.content
-                              }
+                              ) : (
+                                renderMessageWithCitations(msg.content || '[No response]', msg.citations || [])
+                              )}
                             </div>
                           </div>
                         </div>
@@ -614,17 +641,23 @@ const QuintApp = () => {
               </div>
             </div>
             
-            {/* PDF Content */}
+            {/* PDF or TXT Content */}
             <div className="flex-1 overflow-y-auto px-6 py-6 bg-white/30 backdrop-blur-sm">
-              <div className="prose prose-neutral max-w-none text-gray-900">
-                {steveJobsDoc[activeDoc]?.content.split('\n').map((para, idx) => (
-                  para.trim() && (
-                    <p key={idx} className="mb-4 last:mb-0 text-sm leading-relaxed text-gray-800">
-                      {para}
-                    </p>
-                  )
-                ))}
-              </div>
+              {activeDoc && documents.find(doc => doc.id === activeDoc)?.filename.endsWith('.pdf') && (
+                <PDFHighlighterViewer
+                  fileUrl={getFileUrlForDoc(activeDoc)}
+                  highlight={activeCitationHighlight}
+                  onHighlightClick={() => {}}
+                  pageWindow={2}
+                />
+              )}
+              {activeDoc && documents.find(doc => doc.id === activeDoc)?.filename.endsWith('.txt') && (
+                <div className="prose prose-neutral max-w-none text-gray-900 p-6">
+                  <pre style={{ whiteSpace: "pre-wrap" }}>
+                    {getTextContentForDoc(activeDoc)}
+                  </pre>
+                </div>
+              )}
             </div>
           </div>
         </div>

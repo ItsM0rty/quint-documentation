@@ -1,0 +1,20 @@
+.custom-scrollbar {
+  overflow-y: auto !important;
+  max-height: 100%;
+  scrollbar-width: thin;
+  scrollbar-color: #23272e #181818;
+}
+.custom-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #23272e;
+  border-radius: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #374151;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+} 
