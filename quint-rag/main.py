@@ -13,6 +13,7 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler, FileCreatedEvent, FileModifiedEvent, FileDeletedEvent
 from rag_engine import RAGEngine
 import uvicorn
+from fastapi.responses import FileResponse
 
 app = FastAPI(title="Quint RAG API", version="1.0.0")
 
@@ -479,6 +480,19 @@ async def list_indexed_files():
     """List all indexed files"""
     stats = rag.get_stats()
     return {"files": stats.get("files", [])}
+
+@app.get("/documents/{file_id}")
+async def get_document_file(file_id: str):
+    """
+    Serve a document file by its ID (robust to folder structure and multiple watched folders).
+    """
+    doc_info = documents_db.get(file_id)
+    if not doc_info:
+        raise HTTPException(status_code=404, detail="Document not found")
+    file_path = doc_info.get("file_path")
+    if not file_path or not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="File not found on disk")
+    return FileResponse(file_path, filename=doc_info.get("original_name"))
 
 if __name__ == "__main__":
     # Create data directory if it doesn't exist

@@ -157,7 +157,7 @@ class RAGEngine:
         # Prepare context with citations
         context_text = ""
         for i, chunk in enumerate(context_chunks):
-            context_text += f"\n[Source {i+1}: {chunk['filename']}|page {chunk['page']}]\n{chunk['text']}\n"
+            context_text += f"\n[{chunk['filename']}|page {chunk['page']}]\n{chunk['text']}\n"
 
         system_prompt = """You are a helpful research assistant. Answer questions based on the provided context documents. \n\nIMPORTANT CITATION RULES:\n1. Always cite your sources using the format [filename|page X]\n2. Be specific about which document and page number you're referencing\n3. If information comes from multiple sources, cite each one\n4. Only use information from the provided context\n5. If you can't find relevant information in the context, say so clearly\n\nProvide accurate, well-cited responses."""
 
