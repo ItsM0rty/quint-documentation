@@ -446,10 +446,31 @@ const QuintApp = () => {
     // Render the parts into React components
     return parts.map((part, index) => {
       if (part.isCitation) {
+        // Try to extract the cited text (sentence) before the citation marker
+        let citedText = '';
+        if (typeof parts[index - 1] === 'string') {
+          // Get the last sentence or phrase before the citation
+          const prevText = parts[index - 1];
+          // Use regex to get the last sentence or up to 200 chars before the citation
+          const match = prevText.match(/([^.?!\n]{0,200}[.?!])?$/);
+          citedText = match ? match[0].trim() : prevText.trim();
+        }
+        // Fallback: if still empty, grab up to 200 chars before the citation in the whole content
+        if (!citedText) {
+          const citationPos = content.indexOf(`[${part.filename}|page ${part.page}]`);
+          if (citationPos > 0) {
+            const windowStart = Math.max(0, citationPos - 200);
+            citedText = content.substring(windowStart, citationPos).trim();
+          }
+        }
+        // Final fallback: if still empty, use a default text
+        if (!citedText) {
+          citedText = 'Cited content from page ' + part.page;
+        }
         return (
           <sup
             key={index}
-            onClick={() => handleCitationClick(part.filename, part.page)}
+            onClick={() => handleCitationClick(part.filename, part.page, citedText)}
             style={{ cursor: 'pointer', textDecoration: 'underline', color: '#93c5fd' }}
           >
             <Tooltip text={`${part.filename} | Page ${part.page}`}>
@@ -463,33 +484,23 @@ const QuintApp = () => {
     });
   };
 
-  const handleCitationClick = (filename, page) => {
+  const handleCitationClick = (filename, page, citedText = '') => {
     const normalized = (s) => s ? s.trim().toLowerCase() : '';
     const citationBase = normalizeFilename(filename.split(/[\\/]/).pop());
-    // Debug output
-    console.log('Citation filename:', filename);
-    console.log('Citation base:', citationBase);
-    console.log('All document filenames:', documents.map(d => d.filename));
-    console.log('All document bases:', documents.map(d => normalizeFilename(d.filename.split(/[\\/]/).pop())));
     const doc = documents.find(d => {
       const docBase = normalizeFilename(d.filename.split(/[\\/]/).pop());
       return normalized(docBase) === normalized(citationBase);
     });
-
-    // Debug output
-    console.log('Citation clicked:', { filename, page, citationBase });
-    console.log('Available document filenames:', documents.map(d => d.filename));
     if (doc) {
-      setPdfViewerKey(prev => prev + 1); 
+      setPdfViewerKey(prev => prev + 1);
       setActiveDoc(doc.id);
       setActiveCitationHighlight({
         page: Number(page),
-        text: '', // Text to highlight can be added later if available
+        text: citedText,
         position: { pageNumber: Number(page) },
       });
       setShowSidebar(true);
     } else {
-      console.warn('Document not found for citation:', { filename, page, citationBase });
       alert(`Document not found for citation: ${filename}`);
     }
   };
