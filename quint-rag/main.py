@@ -14,6 +14,7 @@ from watchdog.events import FileSystemEventHandler, FileCreatedEvent, FileModifi
 from rag_engine import RAGEngine
 import uvicorn
 from fastapi.responses import FileResponse
+from urllib.parse import unquote
 
 app = FastAPI(title="Quint RAG API", version="1.0.0")
 
@@ -493,6 +494,22 @@ async def get_document_file(file_id: str):
     if not file_path or not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="File not found on disk")
     return FileResponse(file_path, filename=doc_info.get("original_name"))
+
+@app.get("/documents/by-filename/{filename}")
+async def get_document_by_filename(filename: str):
+    """
+    Serve a document file by its filename (robust to URL encoding).
+    """
+    decoded_filename = unquote(filename)
+    # Find the document in the DB by filename
+    for doc_info in documents_db.values():
+        if doc_info.get("filename") == decoded_filename:
+            file_path = doc_info.get("file_path")
+            if file_path and os.path.exists(file_path):
+                return FileResponse(file_path, filename=doc_info.get("original_name"))
+            else:
+                raise HTTPException(status_code=404, detail="File not found on disk")
+    raise HTTPException(status_code=404, detail="Document not found by filename")
 
 if __name__ == "__main__":
     # Create data directory if it doesn't exist

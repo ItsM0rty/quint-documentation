@@ -8,6 +8,7 @@ import { useDropzone } from 'react-dropzone';
 import { queryDocuments, indexFolder, watchFolder, stopWatchingFolder, listWatchedFolders, listDocuments, getStats, checkHealth } from './lib/api';
 import { open } from '@tauri-apps/plugin-dialog';
 import PDFHighlighterViewer from "./components/PDFHighlighterViewer";
+import logo from './assets/logo.png';
 
 const QuintApp = () => {
   // Document management state
@@ -359,8 +360,8 @@ const QuintApp = () => {
     // Find the document by id
     const doc = documents.find(d => d.id === docId);
     if (!doc) return null;
-    // Use the new backend endpoint that serves by id
-    return `http://localhost:8000/documents/${doc.id}`;
+    // Use the new backend endpoint that serves by filename (robust, URL-encoded)
+    return `http://localhost:8000/documents/by-filename/${encodeURIComponent(doc.filename)}`;
   };
 
   const getTextContentForDoc = (docId) => {
@@ -379,6 +380,17 @@ const QuintApp = () => {
       </div>
     </div>
   );
+
+  // Improved normalization for robust filename matching (inspired by open-source tools)
+  function normalizeFilename(str) {
+    if (!str) return '';
+    return str
+      .toLowerCase()
+      .replace(/&/g, ' ') // replace ampersands with space
+      .replace(/[^a-z0-9.\-]+/g, ' ') // keep only alphanumerics, dot, dash
+      .replace(/\s+/g, ' ') // collapse whitespace
+      .trim();
+  }
 
   // --- ROBUST CITATION RENDERING ---
   const renderMessageContent = (content) => {
@@ -453,14 +465,14 @@ const QuintApp = () => {
 
   const handleCitationClick = (filename, page) => {
     const normalized = (s) => s ? s.trim().toLowerCase() : '';
-    const citationBase = filename.split(/[\\/]/).pop();
+    const citationBase = normalizeFilename(filename.split(/[\\/]/).pop());
     // Debug output
     console.log('Citation filename:', filename);
     console.log('Citation base:', citationBase);
     console.log('All document filenames:', documents.map(d => d.filename));
-    console.log('All document bases:', documents.map(d => d.filename.split(/[\\/]/).pop()));
+    console.log('All document bases:', documents.map(d => normalizeFilename(d.filename.split(/[\\/]/).pop())));
     const doc = documents.find(d => {
-      const docBase = d.filename.split(/[\\/]/).pop();
+      const docBase = normalizeFilename(d.filename.split(/[\\/]/).pop());
       return normalized(docBase) === normalized(citationBase);
     });
 
@@ -486,212 +498,224 @@ const QuintApp = () => {
   const [pdfViewerKey, setPdfViewerKey] = useState(0);
 
   return (
-    <div className="flex h-screen overflow-hidden bg-black">
-      {/* Collapsible Sidebar */}
-      <div className={`bg-[#181818] border-r border-[#232323] transition-all duration-300 ease-in-out ${isNavCollapsed ? 'w-12' : 'w-16 sm:w-20'} flex flex-col items-center py-4 gap-4 relative`}>
-        {/* Q Logo */}
-        <div className="mb-2">
-          <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center">
-            <span className="text-black font-bold text-lg">Q</span>
+    <div className="min-h-screen bg-background text-foreground flex flex-col">
+      <div className="flex-1 flex flex-row overflow-hidden min-h-0 min-w-0">
+        {/* Collapsible Sidebar */}
+        <div className={`bg-[#181818] border-r border-[#232323] transition-all duration-300 ease-in-out ${isNavCollapsed ? 'w-12' : 'w-16 sm:w-20'} flex flex-col items-center py-4 gap-4 relative min-h-0 min-w-0`}>
+          {/* Sidebar top icon */}
+          <div className="flex flex-col items-center py-2">
+            <img src={logo} alt="Quint Logo" className="h-10 w-10 rounded" />
           </div>
-        </div>
-        
-        {/* Navigation Icons */}
-        <button className="p-2 rounded hover:bg-[#232323] transition-colors">
-          <span className="sr-only">Home</span>
-          <svg width="20" height="20" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M4 12l1.41-1.41a2 2 0 0 1 2.83 0L12 14.17l3.76-3.76a2 2 0 0 1 2.83 0L20 12"/>
-          </svg>
-        </button>
-        
-        {!isNavCollapsed && (
-          <>
-            <button 
-              onClick={() => setShowFolderModal(true)}
-              className="p-2 rounded hover:bg-[#232323] transition-colors"
-              title="Add Folder"
-            >
-              <FolderOpen className="w-5 h-5 text-white" />
-            </button>
-            <button 
-              onClick={() => setShowDocumentsPanel(!showDocumentsPanel)}
-              className="p-2 rounded hover:bg-[#232323] transition-colors"
-              title="Show Documents"
-            >
-              <FileText className="w-5 h-5 text-white" />
-            </button>
-            <button className="p-2 rounded hover:bg-[#232323] transition-colors">
-              <Plus className="w-5 h-5 text-white" />
-            </button>
-          </>
-        )}
-        
-        {/* Collapse Toggle */}
-        <button 
-          onClick={() => setIsNavCollapsed(!isNavCollapsed)}
-          className="absolute -right-3 top-20 w-6 h-6 bg-[#232323] border border-[#333] rounded-full flex items-center justify-center hover:bg-[#333] transition-colors"
-        >
-          {isNavCollapsed ? (
-            <ChevronRight className="w-3 h-3 text-white" />
-          ) : (
-            <ChevronLeft className="w-3 h-3 text-white" />
-          )}
-        </button>
-      </div>
-
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col bg-black">
-        {/* Header */}
-        <div className="flex items-center justify-between px-8 py-4 border-b border-[#232323] bg-black">
-          <h1 className="text-xl font-semibold text-white">LLM research papers</h1>
           
-          {/* Health Status */}
-          <div className="flex items-center space-x-4">
-            <div className="flex items-center space-x-2">
-              <div className={`w-2 h-2 rounded-full ${healthStatus.backend ? 'bg-green-500' : 'bg-red-500'}`} />
-              <span className="text-sm text-white/70">Backend</span>
-            </div>
-            <div className="text-sm text-white/70">
-              {healthStatus.documents_count || 0} documents
-            </div>
-            <div className="text-sm text-white/70">
-              {healthStatus.watched_folders || 0} watched folders
-            </div>
-          </div>
+          {/* Navigation Icons */}
+          <button className="p-2 rounded hover:bg-[#232323] transition-colors">
+            <span className="sr-only">Home</span>
+            <svg width="20" height="20" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M4 12l1.41-1.41a2 2 0 0 1 2.83 0L12 14.17l3.76-3.76a2 2 0 0 1 2.83 0L20 12"/>
+            </svg>
+          </button>
+          
+          {!isNavCollapsed && (
+            <>
+              <button 
+                onClick={() => setShowFolderModal(true)}
+                className="p-2 rounded hover:bg-[#232323] transition-colors"
+                title="Add Folder"
+              >
+                <FolderOpen className="w-5 h-5 text-white" />
+              </button>
+              <button 
+                onClick={() => setShowDocumentsPanel(!showDocumentsPanel)}
+                className="p-2 rounded hover:bg-[#232323] transition-colors"
+                title="Show Documents"
+              >
+                <FileText className="w-5 h-5 text-white" />
+              </button>
+              <button className="p-2 rounded hover:bg-[#232323] transition-colors">
+                <Plus className="w-5 h-5 text-white" />
+              </button>
+            </>
+          )}
+          
+          {/* Collapse Toggle */}
+          <button 
+            onClick={() => setIsNavCollapsed(!isNavCollapsed)}
+            className="absolute -right-3 top-20 w-6 h-6 bg-[#232323] border border-[#333] rounded-full flex items-center justify-center hover:bg-[#333] transition-colors"
+          >
+            {isNavCollapsed ? (
+              <ChevronRight className="w-3 h-3 text-white" />
+            ) : (
+              <ChevronLeft className="w-3 h-3 text-white" />
+            )}
+          </button>
         </div>
 
-        {/* Chat and PDF viewer */}
-        <div className="flex flex-1 overflow-hidden">
-          {/* Chat Area */}
-          <div
-            className={`flex-1 flex flex-col justify-end px-8 py-4 transition-all duration-500 ease-in-out custom-scrollbar ${showSidebar ? 'w-2/3' : 'w-full'}`}
-            style={{ overflowY: 'auto', maxHeight: 'calc(100vh - 80px)' }}
-          >
-            <div className="space-y-6">
-              {messages.map((msg) => (
-                <div key={msg.id} className={`flex ${msg.type === 'user' ? 'justify-end' : 'justify-center'}`}>
-                  {msg.type === 'user' ? (
-                    <div className="bg-[#181818] max-w-2xl rounded-xl p-4 text-white border border-[#232323]">
-                      {msg.content}
-                    </div>
-                  ) : (
-                    <div className="w-full max-w-4xl">
-                      <div className={`bg-[#1a1a1a] rounded-2xl p-8 text-white border border-[#2a2a2a] shadow-2xl backdrop-blur-sm relative overflow-hidden ${msg.isError ? 'border-red-500/50' : ''}`}>
-                        {/* Subtle gradient overlay */}
-                        <div className="absolute inset-0 bg-gradient-to-br from-white/[0.02] to-transparent pointer-events-none"></div>
-                        
-                        {/* Content */}
-                        <div className="relative z-10">
-                          <div className="flex items-center gap-3 mb-4">
-                            <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center shadow-lg">
-                              <span className="text-black font-bold text-lg">Q</span>
-                            </div>
-                            <span className="text-white/70 text-sm font-medium">Quint</span>
-                            {msg.isLoading && (
-                              <Loader2 className="w-4 h-4 animate-spin text-white/50" />
-                            )}
-                            {msg.isError && (
-                              <AlertCircle className="w-4 h-4 text-red-400" />
-                            )}
-                          </div>
+        {/* Main Content */}
+        <div className="flex-1 flex flex-col bg-black min-h-0 min-w-0">
+          {/* Header */}
+          <div className="flex items-center justify-between px-8 py-4 border-b border-[#232323] bg-black">
+            <h1 className="text-xl font-semibold text-white">LLM research papers</h1>
+            
+            {/* Health Status */}
+            <div className="flex items-center space-x-4">
+              <div className="flex items-center space-x-2">
+                <div className={`w-2 h-2 rounded-full ${healthStatus.backend ? 'bg-green-500' : 'bg-red-500'}`} />
+                <span className="text-sm text-white/70">Backend</span>
+              </div>
+              <div className="text-sm text-white/70">
+                {healthStatus.documents_count || 0} documents
+              </div>
+              <div className="text-sm text-white/70">
+                {healthStatus.watched_folders || 0} watched folders
+              </div>
+            </div>
+          </div>
+
+          {/* Chat and PDF viewer */}
+          <div className="flex flex-1 overflow-hidden min-h-0 min-w-0">
+            {/* Chat Area */}
+            <div
+              className={`flex flex-col justify-end px-8 py-4 transition-all duration-500 ease-in-out custom-scrollbar min-h-0 min-w-0 ${showSidebar ? 'w-2/3' : 'w-full'}`}
+              style={{ overflowY: 'auto' }}
+            >
+              <div className="space-y-6">
+                {messages.map((msg) => (
+                  <div key={msg.id} className={`flex ${msg.type === 'user' ? 'justify-end' : 'justify-center'}`}>
+                    {msg.type === 'user' ? (
+                      <div className="bg-[#181818] max-w-2xl rounded-xl p-4 text-white border border-[#232323]">
+                        {msg.content}
+                      </div>
+                    ) : (
+                      <div className="w-full max-w-4xl">
+                        <div className={`bg-[#1a1a1a] rounded-2xl p-8 text-white border border-[#2a2a2a] shadow-2xl backdrop-blur-sm relative overflow-hidden ${msg.isError ? 'border-red-500/50' : ''}`}>
+                          {/* Subtle gradient overlay */}
+                          <div className="absolute inset-0 bg-gradient-to-br from-white/[0.02] to-transparent pointer-events-none"></div>
                           
-                          <div className="prose prose-invert max-w-none">
-                            <div className="text-white/90 leading-relaxed text-[15px]">
-                              {msg.isLoading ? (
-                                <div className="flex items-center space-x-2">
-                                  <Loader2 className="w-4 h-4 animate-spin" />
-                                  <span>Thinking...</span>
-                                </div>
-                              ) : (
-                                renderMessageContent(msg.content)
+                          {/* Content */}
+                          <div className="relative z-10">
+                            <div className="flex items-center gap-3 mb-4">
+                              <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center shadow-lg">
+                                <span className="text-black font-bold text-lg">Q</span>
+                              </div>
+                              <span className="text-white/70 text-sm font-medium">Quint</span>
+                              {msg.isLoading && (
+                                <Loader2 className="w-4 h-4 animate-spin text-white/50" />
+                              )}
+                              {msg.isError && (
+                                <AlertCircle className="w-4 h-4 text-red-400" />
                               )}
                             </div>
+                            
+                            <div className="prose prose-invert max-w-none">
+                              <div className="text-white/90 leading-relaxed text-[15px]">
+                                {msg.isLoading ? (
+                                  <div className="flex items-center space-x-2">
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                    <span>Thinking...</span>
+                                  </div>
+                                ) : (
+                                  renderMessageContent(msg.content)
+                                )}
+                              </div>
+                            </div>
                           </div>
+                          
+                          {/* Bottom border accent */}
+                          <div className="absolute bottom-0 left-0 right-0 h-[1px] bg-gradient-to-r from-transparent via-white/10 to-transparent"></div>
                         </div>
-                        
-                        {/* Bottom border accent */}
-                        <div className="absolute bottom-0 left-0 right-0 h-[1px] bg-gradient-to-r from-transparent via-white/10 to-transparent"></div>
                       </div>
+                    )}
+                  </div>
+                ))}
+                <div ref={chatEndRef} />
+              </div>
+              
+              {/* Premium Translucent Input */}
+              <div className="mt-8 flex items-end gap-3 relative">
+                <div className="flex-1 relative backdrop-blur-xl bg-white/5 border border-white/10 rounded-2xl shadow-2xl">
+                  <textarea
+                    ref={textareaRef}
+                    value={message}
+                    onChange={(e) => setMessage(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    placeholder="Ask for anything"
+                    className="w-full bg-transparent text-white placeholder-white/50 p-4 pr-12 rounded-2xl focus:outline-none resize-none min-h-[56px] max-h-[300px] leading-relaxed"
+                    rows={1}
+                  />
+                  <button
+                    onClick={handleSendMessage}
+                    disabled={!message.trim()}
+                    className="absolute right-3 bottom-3 p-2 rounded-xl bg-white/10 text-white hover:bg-white/20 disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-200 backdrop-blur-sm"
+                  >
+                    <Send className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Enhanced PDF Viewer Popup - only render when open */}
+            {showSidebar && (
+              <div
+                className={
+                  `transition-all duration-500 ease-in-out transform w-1/3 max-w-[600px] min-w-[320px] h-full`
+                }
+                style={{
+                  background: 'rgba(255,255,255,0.95)',
+                  backdropFilter: 'blur(8px)',
+                  border: '1px solid rgba(255,255,255,0.2)',
+                  borderRadius: '1.5rem',
+                  boxShadow: '0 4px 32px rgba(0,0,0,0.12)',
+                  overflow: 'auto',
+                }}
+              >
+                {/* Enhanced PDF Header */}
+                <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200/50 bg-white/50 backdrop-blur-sm">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 bg-red-500 rounded-lg flex items-center justify-center">
+                      <svg width="16" height="16" fill="white" viewBox="0 0 24 24">
+                        <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z" />
+                      </svg>
+                    </div>
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900 leading-tight">{steveJobsDoc[activeDoc]?.title}</h2>
+                      <p className="text-sm text-gray-500">PDF • {steveJobsDoc[activeDoc]?.pages} pages</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button className="p-2 rounded-lg hover:bg-gray-100/50 transition-colors">
+                      <RotateCcw className="w-5 h-5 text-gray-600" />
+                    </button>
+                    <button className="p-2 rounded-lg hover:bg-gray-100/50 transition-colors">
+                      <Maximize2 className="w-5 h-5 text-gray-600" />
+                    </button>
+                    <button 
+                      onClick={() => setShowSidebar(false)}
+                      className="p-2 rounded-lg hover:bg-gray-100/50 transition-colors"
+                    >
+                      <X className="w-5 h-5 text-gray-600" />
+                    </button>
+                  </div>
+                </div>
+                
+                {/* PDF or TXT Content */}
+                <div className="flex-1 overflow-y-auto px-6 py-6 bg-white/30 backdrop-blur-sm min-h-0 min-w-0">
+                  {activeDoc && documents.find(doc => doc.id === activeDoc)?.filename.endsWith('.pdf') && (
+                    <PDFHighlighterViewer
+                      key={pdfViewerKey}
+                      fileUrl={getFileUrlForDoc(activeDoc)}
+                      highlight={activeCitationHighlight}
+                    />
+                  )}
+                  {activeDoc && documents.find(doc => doc.id === activeDoc)?.filename.endsWith('.txt') && (
+                    <div className="prose prose-neutral max-w-none text-gray-900 p-6">
+                      <pre style={{ whiteSpace: "pre-wrap" }}>
+                        {getTextContentForDoc(activeDoc)}
+                      </pre>
                     </div>
                   )}
                 </div>
-              ))}
-              <div ref={chatEndRef} />
-            </div>
-            
-            {/* Premium Translucent Input */}
-            <div className="mt-8 flex items-end gap-3 relative">
-              <div className="flex-1 relative backdrop-blur-xl bg-white/5 border border-white/10 rounded-2xl shadow-2xl">
-                <textarea
-                  ref={textareaRef}
-                  value={message}
-                  onChange={(e) => setMessage(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  placeholder="Ask for anything"
-                  className="w-full bg-transparent text-white placeholder-white/50 p-4 pr-12 rounded-2xl focus:outline-none resize-none min-h-[56px] max-h-[300px] leading-relaxed"
-                  rows={1}
-                />
-                <button
-                  onClick={handleSendMessage}
-                  disabled={!message.trim()}
-                  className="absolute right-3 bottom-3 p-2 rounded-xl bg-white/10 text-white hover:bg-white/20 disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-200 backdrop-blur-sm"
-                >
-                  <Send className="w-4 h-4" />
-                </button>
               </div>
-            </div>
-          </div>
-
-          {/* Enhanced PDF Viewer Popup */}
-          <div className={`h-full flex flex-col bg-white/95 backdrop-blur-xl border border-white/20 rounded-3xl shadow-2xl overflow-hidden transition-all duration-500 ease-in-out transform ${
-            showSidebar ? 'w-1/3 translate-x-0 opacity-100' : 'w-0 translate-x-full opacity-0 pointer-events-none'
-          }`}>
-            {/* Enhanced PDF Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200/50 bg-white/50 backdrop-blur-sm">
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 bg-red-500 rounded-lg flex items-center justify-center">
-                  <svg width="16" height="16" fill="white" viewBox="0 0 24 24">
-                    <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20Z" />
-                  </svg>
-                </div>
-                <div>
-                  <h2 className="text-lg font-semibold text-gray-900 leading-tight">{steveJobsDoc[activeDoc]?.title}</h2>
-                  <p className="text-sm text-gray-500">PDF • {steveJobsDoc[activeDoc]?.pages} pages</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-1">
-                <button className="p-2 rounded-lg hover:bg-gray-100/50 transition-colors">
-                  <RotateCcw className="w-5 h-5 text-gray-600" />
-                </button>
-                <button className="p-2 rounded-lg hover:bg-gray-100/50 transition-colors">
-                  <Maximize2 className="w-5 h-5 text-gray-600" />
-                </button>
-                <button 
-                  onClick={() => setShowSidebar(false)}
-                  className="p-2 rounded-lg hover:bg-gray-100/50 transition-colors"
-                >
-                  <X className="w-5 h-5 text-gray-600" />
-                </button>
-              </div>
-            </div>
-            
-            {/* PDF or TXT Content */}
-            <div className="flex-1 overflow-y-auto px-6 py-6 bg-white/30 backdrop-blur-sm">
-              {activeDoc && documents.find(doc => doc.id === activeDoc)?.filename.endsWith('.pdf') && (
-                <PDFHighlighterViewer
-                  key={pdfViewerKey}
-                  fileUrl={getFileUrlForDoc(activeDoc)}
-                  highlight={activeCitationHighlight}
-                />
-              )}
-              {activeDoc && documents.find(doc => doc.id === activeDoc)?.filename.endsWith('.txt') && (
-                <div className="prose prose-neutral max-w-none text-gray-900 p-6">
-                  <pre style={{ whiteSpace: "pre-wrap" }}>
-                    {getTextContentForDoc(activeDoc)}
-                  </pre>
-                </div>
-              )}
-            </div>
+            )}
           </div>
         </div>
       </div>
