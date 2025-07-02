@@ -163,17 +163,24 @@ class FolderEventHandler(FileSystemEventHandler):
             print(f"Error updating document {relative_path}: {e}")
     
     def _remove_document_from_db(self, relative_path: str):
-        """Remove a document from the database"""
+        """Remove a document from the database and ChromaDB"""
         try:
             file_ids_to_remove = []
             for file_id, doc_info in documents_db.items():
                 if doc_info.get("filename") == relative_path:
                     file_ids_to_remove.append(file_id)
-            
             for file_id in file_ids_to_remove:
+                # Remove from ChromaDB robustly by metadata
+                filename = documents_db[file_id]["filename"]
+                rag.collection.delete(where={"filename": filename})
+                # Confirm deletion
+                remaining = rag.collection.get(where={"filename": filename})
+                if remaining["ids"]:
+                    print(f"[ChromaDB] WARNING: Chunks for {filename} still present after delete!")
+                else:
+                    print(f"[ChromaDB] All chunks for {filename} deleted.")
                 del documents_db[file_id]
                 print(f"Removed document: {relative_path}")
-                
         except Exception as e:
             print(f"Error removing document {relative_path}: {e}")
 
@@ -325,12 +332,20 @@ async def remove_watched_folder(folder_path: str):
         
         # Remove all documents that were tracked from this folder
         files_to_remove = []
-        for file_id, doc_info in documents_db.items():
-            if doc_info.get("source_folder") == folder_path and doc_info.get("is_watched_file"):
+        for file_id, doc_info in list(documents_db.items()):
+            if doc_info.get("source_folder") == folder_path:
                 files_to_remove.append(file_id)
         
-        # Remove the documents from the database
+        # Remove the documents from the database and ChromaDB robustly
         for file_id in files_to_remove:
+            filename = documents_db[file_id]["filename"]
+            rag.collection.delete(where={"filename": filename})
+            # Confirm deletion
+            remaining = rag.collection.get(where={"filename": filename})
+            if remaining["ids"]:
+                print(f"[ChromaDB] WARNING: Chunks for {filename} still present after delete!")
+            else:
+                print(f"[ChromaDB] All chunks for {filename} deleted.")
             del documents_db[file_id]
         
         print(f"Stopped watching folder: {folder_path} and removed {len(files_to_remove)} tracked files")
@@ -342,6 +357,7 @@ async def remove_watched_folder(folder_path: str):
         }
         
     except Exception as e:
+        print(f"Error removing watched folder {folder_path}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to remove folder: {str(e)}")
 
 @app.get("/watch/folders")
@@ -510,6 +526,23 @@ async def get_document_by_filename(filename: str):
             else:
                 raise HTTPException(status_code=404, detail="File not found on disk")
     raise HTTPException(status_code=404, detail="Document not found by filename")
+
+def cleanup_orphaned_chromadb_entries():
+    # Get all files currently indexed in ChromaDB
+    all_docs = rag.collection.get()
+    if not all_docs['metadatas']:
+        return
+    filenames_in_db = set(doc['filename'] for doc in all_docs['metadatas'])
+    filenames_in_documents_db = set(doc['filename'] for doc in documents_db.values())
+    orphaned_filenames = filenames_in_db - filenames_in_documents_db
+    for orphan in orphaned_filenames:
+        # Remove all chunks for this orphaned file
+        orphan_chunks = [meta['chunk_id'] for meta in all_docs['metadatas'] if meta['filename'] == orphan]
+        if orphan_chunks:
+            rag.collection.delete(ids=orphan_chunks)
+            print(f"[CLEANUP] Removed orphaned ChromaDB entries for: {orphan}")
+
+cleanup_orphaned_chromadb_entries()
 
 if __name__ == "__main__":
     # Create data directory if it doesn't exist

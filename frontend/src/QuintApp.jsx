@@ -479,6 +479,7 @@ const QuintApp = () => {
             citedText,
             extractionMethod
           });
+          
         }
         return (
           <sup
