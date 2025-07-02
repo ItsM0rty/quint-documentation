@@ -522,8 +522,8 @@ const QuintApp = () => {
   const [pdfViewerKey, setPdfViewerKey] = useState(0);
 
   return (
-    <div className="min-h-screen bg-background text-foreground flex flex-col">
-      <div className="flex-1 flex flex-row overflow-hidden min-h-0 min-w-0">
+    <div className="h-screen w-screen bg-background text-foreground flex flex-col">
+      <div className="flex-1 min-h-0 min-w-0 h-full flex flex-row overflow-hidden">
         {/* Collapsible Sidebar */}
         <div className={`bg-[#181818] border-r border-[#232323] transition-all duration-300 ease-in-out ${isNavCollapsed ? 'w-12' : 'w-16 sm:w-20'} flex flex-col items-center py-4 gap-4 relative min-h-0 min-w-0`}>
           {/* Sidebar top icon */}
@@ -575,7 +575,7 @@ const QuintApp = () => {
         </div>
 
         {/* Main Content */}
-        <div className="flex-1 flex flex-col bg-black min-h-0 min-w-0">
+        <div className="flex-1 min-h-0 min-w-0 h-full flex flex-col bg-black">
           {/* Header */}
           <div className="flex items-center justify-between px-8 py-4 border-b border-[#232323] bg-black">
             <h1 className="text-xl font-semibold text-white">LLM research papers</h1>
@@ -596,13 +596,12 @@ const QuintApp = () => {
           </div>
 
           {/* Chat and PDF viewer */}
-          <div className="flex flex-1 overflow-hidden min-h-0 min-w-0">
+          <div className="flex-1 min-h-0 min-w-0 h-full flex flex-row overflow-hidden">
             {/* Chat Area */}
             <div
-              className={`flex flex-col justify-end px-8 py-4 transition-all duration-500 ease-in-out custom-scrollbar min-h-0 min-w-0 ${showSidebar ? 'w-2/3' : 'w-full'}`}
-              style={{ overflowY: 'auto' }}
+              className={`flex flex-col flex-1 min-h-0 min-w-0 h-full overflow-y-auto custom-scrollbar px-8 py-4 transition-all duration-500 ease-in-out ${showSidebar ? 'w-2/3' : 'w-full'}`}
             >
-              <div className="space-y-6">
+              <div className="flex-1 min-h-0 space-y-6 overflow-y-auto">
                 {messages.map((msg) => (
                   <div key={msg.id} className={`flex ${msg.type === 'user' ? 'justify-end' : 'justify-center'}`}>
                     {msg.type === 'user' ? (
@@ -653,26 +652,27 @@ const QuintApp = () => {
                 ))}
                 <div ref={chatEndRef} />
               </div>
-              
-              {/* Premium Translucent Input */}
-              <div className="mt-8 flex items-end gap-3 relative">
-                <div className="flex-1 relative backdrop-blur-xl bg-white/5 border border-white/10 rounded-2xl shadow-2xl">
-                  <textarea
-                    ref={textareaRef}
-                    value={message}
-                    onChange={(e) => setMessage(e.target.value)}
-                    onKeyDown={handleKeyDown}
-                    placeholder="Ask for anything"
-                    className="w-full bg-transparent text-white placeholder-white/50 p-4 pr-12 rounded-2xl focus:outline-none resize-none min-h-[56px] max-h-[300px] leading-relaxed"
-                    rows={1}
-                  />
-                  <button
-                    onClick={handleSendMessage}
-                    disabled={!message.trim()}
-                    className="absolute right-3 bottom-3 p-2 rounded-xl bg-white/10 text-white hover:bg-white/20 disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-200 backdrop-blur-sm"
-                  >
-                    <Send className="w-4 h-4" />
-                  </button>
+              <div className="sticky bottom-0 bg-black/80 pt-4 z-10">
+                {/* Premium Translucent Input */}
+                <div className="flex items-end gap-3 relative">
+                  <div className="flex-1 relative backdrop-blur-xl bg-white/5 border border-white/10 rounded-2xl shadow-2xl">
+                    <textarea
+                      ref={textareaRef}
+                      value={message}
+                      onChange={(e) => setMessage(e.target.value)}
+                      onKeyDown={handleKeyDown}
+                      placeholder="Ask for anything"
+                      className="w-full bg-transparent text-white placeholder-white/50 p-4 pr-12 rounded-2xl focus:outline-none resize-none min-h-[56px] max-h-[300px] leading-relaxed"
+                      rows={1}
+                    />
+                    <button
+                      onClick={handleSendMessage}
+                      disabled={!message.trim()}
+                      className="absolute right-3 bottom-3 p-2 rounded-xl bg-white/10 text-white hover:bg-white/20 disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-200 backdrop-blur-sm"
+                    >
+                      <Send className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>

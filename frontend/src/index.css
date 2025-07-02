@@ -1,12 +1,14 @@
 .custom-scrollbar {
   overflow-y: auto !important;
   max-height: 100%;
-  scrollbar-width: thin;
-  scrollbar-color: #23272e #181818;
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE and Edge */
 }
 .custom-scrollbar::-webkit-scrollbar {
-  width: 8px;
-  background: transparent;
+  width: 0 !important;            /* Chrome, Safari, Opera, WebKit */
+  height: 0 !important;
+  background: transparent !important;
+  display: none !important;
 }
 .custom-scrollbar::-webkit-scrollbar-thumb {
   background: #23272e;
