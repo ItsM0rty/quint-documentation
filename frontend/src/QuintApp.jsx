@@ -448,24 +448,37 @@ const QuintApp = () => {
       if (part.isCitation) {
         // Try to extract the cited text (sentence) before the citation marker
         let citedText = '';
+        let extractionMethod = 'sentence';
         if (typeof parts[index - 1] === 'string') {
-          // Get the last sentence or phrase before the citation
           const prevText = parts[index - 1];
-          // Use regex to get the last sentence or up to 200 chars before the citation
-          const match = prevText.match(/([^.?!\n]{0,200}[.?!])?$/);
+          // Try to get the last sentence or up to 300 chars before the citation
+          const match = prevText.match(/([^.?!\n]{0,300}[.?!])?$/);
           citedText = match ? match[0].trim() : prevText.trim();
         }
-        // Fallback: if still empty, grab up to 200 chars before the citation in the whole content
+        // Fallback: if still empty, grab up to 300 chars before the citation in the whole content
         if (!citedText) {
+          extractionMethod = 'window';
           const citationPos = content.indexOf(`[${part.filename}|page ${part.page}]`);
           if (citationPos > 0) {
-            const windowStart = Math.max(0, citationPos - 200);
+            const windowStart = Math.max(0, citationPos - 300);
             citedText = content.substring(windowStart, citationPos).trim();
           }
         }
         // Final fallback: if still empty, use a default text
         if (!citedText) {
+          extractionMethod = 'default';
           citedText = 'Cited content from page ' + part.page;
+        }
+        if (citedText.length < 10) {
+          extractionMethod += ' (short)';
+        }
+        if (typeof window !== 'undefined' && window.console) {
+          console.log('[Quint Citation Extraction]', {
+            filename: part.filename,
+            page: part.page,
+            citedText,
+            extractionMethod
+          });
         }
         return (
           <sup
@@ -712,7 +725,11 @@ const QuintApp = () => {
                 <div className="flex-1 overflow-y-auto px-6 py-6 bg-white/30 backdrop-blur-sm min-h-0 min-w-0">
                   {activeDoc && documents.find(doc => doc.id === activeDoc)?.filename.endsWith('.pdf') && (
                     <PDFHighlighterViewer
-                      key={pdfViewerKey}
+                      key={
+                        `${documents.find(doc => doc.id === activeDoc)?.filename || ''}-` +
+                        `${activeCitationHighlight?.page || ''}-` +
+                        `${activeCitationHighlight?.text || ''}`
+                      }
                       fileUrl={getFileUrlForDoc(activeDoc)}
                       highlight={activeCitationHighlight}
                     />
