@@ -1,256 +1,273 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as pdfjsLib from 'pdfjs-dist';
 import 'pdfjs-dist/web/pdf_viewer.css';
-import { remove as removeDiacritics } from 'diacritics';
 
-// Set up PDF.js worker for Vite (must use a public path string, not import)
+// Set up PDF.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.js';
 
-// DEBUG: Set this to true to enable console logging for highlight matching
-const DEBUG_HIGHLIGHT = true;
-
-function robustNormalize(str) {
-  if (!str) return '';
-  return removeDiacritics(str)
-    .normalize('NFKD')
-    .toLowerCase()
-    .replace(/[-‐‑‒–—―]/g, ' ') // all hyphens to space
-    .replace(/[\u2018-\u201F\u0022\u0027]/g, '') // remove quotes
-    .replace(/[^a-z0-9\s]/g, '') // remove all punctuation
-    .replace(/\s+/g, ' ') // collapse whitespace
-    .trim();
-}
-
-function fuzzyIncludes(haystack, needle) {
-  // Robust fuzzy match: ignore case, allow up to 20% difference, ignore whitespace
-  if (!haystack || !needle) return false;
-  const h = haystack.toLowerCase().replace(/\s+/g, '');
-  const n = needle.toLowerCase().replace(/\s+/g, '');
-  if (h.includes(n)) return true;
-  // Levenshtein distance (basic, for short text)
-  function lev(a, b) {
-    const matrix = Array.from({ length: a.length + 1 }, () => Array(b.length + 1).fill(0));
-    for (let i = 0; i <= a.length; i++) matrix[i][0] = i;
-    for (let j = 0; j <= b.length; j++) matrix[0][j] = j;
-    for (let i = 1; i <= a.length; i++) {
-      for (let j = 1; j <= b.length; j++) {
-        matrix[i][j] = Math.min(
-          matrix[i - 1][j] + 1,
-          matrix[i][j - 1] + 1,
-          matrix[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)
-        );
-      }
-    }
-    return matrix[a.length][b.length];
-  }
-  const dist = lev(h, n);
-  return dist / Math.max(h.length, n.length) < 0.2;
-}
-
-/**
- * PDFHighlighterViewer (robust, scrollable, multi-page, highlightable)
- * @param {string} fileUrl - URL or path to the PDF file
- * @param {object} highlight - { page, text, position }
- * @param {function} onHighlightClick - optional, called when highlight is clicked
- */
 const PDFHighlighterViewer = ({ fileUrl, highlight }) => {
   const canvasRef = useRef(null);
+  const overlayRef = useRef(null);
+  const containerRef = useRef(null);
   const [pdf, setPdf] = useState(null);
-  const [pageViewport, setPageViewport] = useState(null);
+  const [currentPage, setCurrentPage] = useState(null);
+  const [scale, setScale] = useState(1.0);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [textHighlights, setTextHighlights] = useState([]);
+  const [highlightRects, setHighlightRects] = useState([]);
+  const renderTaskRef = useRef(null);
 
-  // Load PDF document
+  // Load PDF
   useEffect(() => {
-    let isMounted = true;
+    if (!fileUrl) return;
+
+    setLoading(true);
     setError(null);
-    setPdf(null);
-    setPageViewport(null);
-    setTextHighlights([]);
+
     pdfjsLib.getDocument(fileUrl).promise
-      .then((loadedPdf) => {
-        if (isMounted) {
-          setPdf(loadedPdf);
-        }
+      .then((pdfDoc) => {
+        setPdf(pdfDoc);
+        setLoading(false);
       })
       .catch((err) => {
         setError('Failed to load PDF: ' + err.message);
+        setLoading(false);
       });
-    return () => { isMounted = false; };
   }, [fileUrl]);
 
-  // Render only the cited page
-  useEffect(() => {
-    if (!pdf || !highlight || !highlight.page) return;
-    let cancelled = false;
-    const renderPage = async () => {
-      try {
-        const page = await pdf.getPage(highlight.page);
-        const scale = 1.2;
-        const viewport = page.getViewport({ scale });
-        setPageViewport(viewport);
-        const canvas = canvasRef.current;
-        if (canvas) {
-          const context = canvas.getContext('2d');
-          canvas.height = viewport.height;
-          canvas.width = viewport.width;
-          await page.render({ canvasContext: context, viewport }).promise;
-        }
-      } catch (err) {
-        if (!cancelled) setError('Failed to render page: ' + err.message);
-      }
-    };
-    renderPage();
-    return () => { cancelled = true; };
-  }, [pdf, highlight]);
+  // Find and highlight text
+  const findAndHighlightText = async (page, viewport, searchText) => {
+    if (!searchText) return [];
 
-  // Extract and highlight cited text (if available) on the cited page only
-  useEffect(() => {
-    if (!pdf || !highlight || !highlight.page || !highlight.text) {
-      setTextHighlights([]);
-      return;
-    }
-    let cancelled = false;
-    const citedText = highlight.text;
-    const doTextHighlight = async () => {
-      try {
-        const page = await pdf.getPage(highlight.page);
-        const scale = 1.2;
-        const viewport = page.getViewport({ scale });
-        const textContent = await page.getTextContent();
-        const items = textContent.items;
-        const normCited = robustNormalize(citedText);
-        const normItems = items.map(i => robustNormalize(i.str));
-        // Try exact substring match first
-        let matchIndices = null;
-        for (let i = 0; i < normItems.length; i++) {
-          for (let j = i + 1; j <= normItems.length; j++) {
-            const windowNorm = normItems.slice(i, j).join(' ');
-            if (windowNorm.includes(normCited) && normCited.length > 5) {
-              matchIndices = [i, j];
+    try {
+      const textContent = await page.getTextContent();
+      const items = textContent.items;
+      const searchLower = searchText.toLowerCase();
+      
+      const rects = [];
+      
+      // Simple text matching - find text items that contain the search text
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.str.toLowerCase().includes(searchLower)) {
+          // Transform the text item's bounding box to viewport coordinates
+          const transform = pdfjsLib.Util.transform(viewport.transform, item.transform);
+          
+          rects.push({
+            left: transform[4],
+            top: transform[5] - item.height,
+            width: item.width,
+            height: item.height,
+          });
+        }
+      }
+
+      // If no direct matches, try to find partial matches across multiple items
+      if (rects.length === 0) {
+        const searchWords = searchText.toLowerCase().split(/\s+/).filter(word => word.length > 2);
+        
+        for (let i = 0; i < items.length; i++) {
+          const item = items[i];
+          const itemLower = item.str.toLowerCase();
+          
+          for (const word of searchWords) {
+            if (itemLower.includes(word)) {
+              const transform = pdfjsLib.Util.transform(viewport.transform, item.transform);
+              
+              rects.push({
+                left: transform[4],
+                top: transform[5] - item.height,
+                width: item.width,
+                height: item.height,
+              });
               break;
             }
           }
-          if (matchIndices) break;
         }
-        if (matchIndices) {
-          const rects = [];
-          for (let i = matchIndices[0]; i < matchIndices[1]; i++) {
-            const item = items[i];
-            const tx = pdfjsLib.Util.transform(viewport.transform, item.transform);
-            rects.push({
-              left: tx[4],
-              top: tx[5] - item.height,
-              width: item.width,
-              height: item.height,
-            });
-          }
-          if (!cancelled) setTextHighlights(rects);
-          return;
-        }
-        // Fallback: fuzzy match (windowed Jaccard/Levenshtein)
-        let bestMatch = null;
-        let bestScore = Infinity;
-        for (let windowSize = 1; windowSize <= Math.min(30, normItems.length); windowSize++) {
-          for (let start = 0; start <= normItems.length - windowSize; start++) {
-            const windowNorm = normItems.slice(start, start + windowSize).join(' ');
-            // Jaccard
-            const setA = new Set(windowNorm.split(' '));
-            const setB = new Set(normCited.split(' '));
-            const intersection = new Set([...setA].filter(x => setB.has(x)));
-            const union = new Set([...setA, ...setB]);
-            const jaccard = intersection.size / union.size;
-            // Levenshtein
-            function lev(a, b) {
-              const matrix = Array.from({ length: a.length + 1 }, () => Array(b.length + 1).fill(0));
-              for (let i = 0; i <= a.length; i++) matrix[i][0] = i;
-              for (let j = 0; j <= b.length; j++) matrix[0][j] = j;
-              for (let i = 1; i <= a.length; i++) {
-                for (let j = 1; j <= b.length; j++) {
-                  matrix[i][j] = Math.min(
-                    matrix[i - 1][j] + 1,
-                    matrix[i][j - 1] + 1,
-                    matrix[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)
-                  );
-                }
-              }
-              return matrix[a.length][b.length];
-            }
-            const levDist = lev(windowNorm, normCited);
-            const levScore = levDist / Math.max(windowNorm.length, normCited.length);
-            const score = levScore - jaccard;
-            if (score < bestScore) {
-              bestScore = score;
-              bestMatch = { start, end: start + windowSize };
-            }
-          }
-        }
-        if (bestMatch && bestScore < 0.5) {
-          const rects = [];
-          for (let i = bestMatch.start; i < bestMatch.end; i++) {
-            const item = items[i];
-            const tx = pdfjsLib.Util.transform(viewport.transform, item.transform);
-            rects.push({
-              left: tx[4],
-              top: tx[5] - item.height,
-              width: item.width,
-              height: item.height,
-            });
-          }
-          if (!cancelled) setTextHighlights(rects);
-          return;
-        }
-        // Final fallback: highlight nothing
-        setTextHighlights([]);
-      } catch (err) {
-        if (!cancelled) setTextHighlights([]);
       }
-    };
-    doTextHighlight();
-    return () => { cancelled = true; };
-  }, [pdf, highlight]);
+
+      return rects;
+    } catch (err) {
+      console.error('Error finding text:', err);
+      return [];
+    }
+  };
+
+  // Draw highlights on overlay canvas
+  const drawHighlights = (rects) => {
+    const overlay = overlayRef.current;
+    if (!overlay) return;
+
+    const ctx = overlay.getContext('2d');
+    ctx.clearRect(0, 0, overlay.width, overlay.height);
+
+    // Draw highlight rectangles
+    ctx.fillStyle = 'rgba(255, 255, 0, 0.3)';
+    ctx.strokeStyle = 'rgba(255, 193, 7, 0.8)';
+    ctx.lineWidth = 1;
+
+    rects.forEach(rect => {
+      ctx.fillRect(rect.left, rect.top, rect.width, rect.height);
+      ctx.strokeRect(rect.left, rect.top, rect.width, rect.height);
+    });
+  };
+
+  // Render page
+  const renderPage = async (pageNum, targetScale = scale) => {
+    if (!pdf || !canvasRef.current) return;
+
+    // Cancel previous render task
+    if (renderTaskRef.current) {
+      renderTaskRef.current.cancel();
+    }
+
+    try {
+      const page = await pdf.getPage(pageNum);
+      const viewport = page.getViewport({ scale: targetScale });
+
+      const canvas = canvasRef.current;
+      const overlay = overlayRef.current;
+      const context = canvas.getContext('2d');
+
+      // Set canvas dimensions
+      canvas.height = viewport.height;
+      canvas.width = viewport.width;
+      
+      if (overlay) {
+        overlay.height = viewport.height;
+        overlay.width = viewport.width;
+      }
+
+      // Render PDF page
+      const renderTask = page.render({
+        canvasContext: context,
+        viewport: viewport
+      });
+
+      renderTaskRef.current = renderTask;
+      await renderTask.promise;
+      
+      setCurrentPage(pageNum);
+
+      // Find and draw highlights if we have highlight text
+      if (highlight?.text) {
+        const rects = await findAndHighlightText(page, viewport, highlight.text);
+        setHighlightRects(rects);
+        drawHighlights(rects);
+      } else {
+        setHighlightRects([]);
+        if (overlay) {
+          const ctx = overlay.getContext('2d');
+          ctx.clearRect(0, 0, overlay.width, overlay.height);
+        }
+      }
+    } catch (err) {
+      if (err.name !== 'RenderingCancelled') {
+        console.error('Render error:', err);
+      }
+    }
+  };
+
+  // Handle zoom
+  const handleZoom = (newScale) => {
+    const clampedScale = Math.max(0.5, Math.min(3.0, newScale));
+    setScale(clampedScale);
+    
+    if (highlight?.page) {
+      renderPage(highlight.page, clampedScale);
+    }
+  };
+
+  // Fit to width
+  const fitToWidth = async () => {
+    if (!pdf || !highlight?.page || !containerRef.current) return;
+
+    const page = await pdf.getPage(highlight.page);
+    const viewport = page.getViewport({ scale: 1 });
+    const containerWidth = containerRef.current.offsetWidth;
+    const newScale = containerWidth / viewport.width;
+    
+    setScale(newScale);
+    renderPage(highlight.page, newScale);
+  };
+
+  // Render highlighted page when highlight changes
+  useEffect(() => {
+    if (pdf && highlight?.page) {
+      renderPage(highlight.page, scale);
+    }
+  }, [pdf, highlight?.page, scale]);
+
+  // Fit to width on mount and resize
+  useEffect(() => {
+    if (pdf && highlight?.page) {
+      fitToWidth();
+    }
+  }, [pdf, highlight?.page]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-gray-600">Loading PDF...</div>
+      </div>
+    );
+  }
 
   if (error) {
-    return <div className="text-red-500 p-4">{error}</div>;
-  }
-  if (!pdf || !highlight || !highlight.page) {
-    return <div className="p-4">Loading PDF...</div>;
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-red-600">{error}</div>
+      </div>
+    );
   }
 
   return (
-    <div
-      className="bg-neutral-900 border-l border-neutral-800 relative flex justify-center items-center"
-      style={{
-        maxWidth: '80vw',
-        maxHeight: '80vh',
-        width: '100%',
-        height: '100%',
-        margin: 'auto',
-        overflow: 'auto',
-        borderRadius: '1rem',
-      }}
-    >
-      <div className="flex flex-col items-center gap-8 py-8 w-full">
-        <div
-          id={`pdf-page-${highlight.page - 1}`}
-          className="relative mb-4 shadow-lg rounded overflow-hidden bg-[#222]"
+    <div className="flex flex-col h-full">
+      {/* Zoom Controls */}
+      <div className="flex items-center gap-2 p-2 border-b bg-gray-50">
+        <button
+          onClick={() => handleZoom(scale - 0.25)}
+          className="px-3 py-1 text-sm bg-white border rounded hover:bg-gray-100"
+          disabled={scale <= 0.5}
         >
-          <canvas ref={canvasRef} />
-          {/* Render highlight overlays */}
-          {pageViewport && textHighlights.length > 0 && textHighlights.map((rect, i) => (
-            <div
-              key={i}
-              className="absolute bg-yellow-300 opacity-50 pointer-events-none rounded"
-              style={{
-                left: rect.left,
-                top: rect.top,
-                width: rect.width,
-                height: rect.height,
-                border: '2px solid #facc15',
-                boxSizing: 'border-box',
-              }}
-            />
-          ))}
+          Zoom Out
+        </button>
+        <span className="text-sm text-gray-600 min-w-[60px] text-center">
+          {Math.round(scale * 100)}%
+        </span>
+        <button
+          onClick={() => handleZoom(scale + 0.25)}
+          className="px-3 py-1 text-sm bg-white border rounded hover:bg-gray-100"
+          disabled={scale >= 3.0}
+        >
+          Zoom In
+        </button>
+        <button
+          onClick={fitToWidth}
+          className="px-3 py-1 text-sm bg-white border rounded hover:bg-gray-100 ml-2"
+        >
+          Fit Width
+        </button>
+      </div>
+
+      {/* PDF Container */}
+      <div 
+        ref={containerRef}
+        className="flex-1 overflow-auto custom-scrollbar"
+      >
+        <div className="flex justify-center p-4 relative">
+          <canvas
+            ref={canvasRef}
+            className="border shadow-sm"
+          />
+          <canvas
+            ref={overlayRef}
+            className="absolute top-0 left-0 pointer-events-none"
+            style={{
+              border: '1px solid #d1d5db',
+              boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1)',
+            }}
+          />
         </div>
       </div>
     </div>

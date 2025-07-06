@@ -601,8 +601,15 @@ const QuintApp = () => {
             {/* Chat Area */}
             <div
               className={`flex flex-col flex-1 min-h-0 min-w-0 h-full overflow-y-auto custom-scrollbar px-8 py-4 transition-all duration-500 ease-in-out ${showSidebar ? 'w-2/3' : 'w-full'}`}
+              style={{
+                scrollbarWidth: 'none', /* Firefox */
+                msOverflowStyle: 'none', /* IE and Edge */
+              }}
             >
-              <div className="flex-1 min-h-0 space-y-6 overflow-y-auto">
+              <div className="flex-1 min-h-0 space-y-6 overflow-y-auto custom-scrollbar" style={{
+                scrollbarWidth: 'none', /* Firefox */
+                msOverflowStyle: 'none', /* IE and Edge */
+              }}>
                 {messages.map((msg) => (
                   <div key={msg.id} className={`flex ${msg.type === 'user' ? 'justify-end' : 'justify-center'}`}>
                     {msg.type === 'user' ? (
